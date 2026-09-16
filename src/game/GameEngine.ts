@@ -16,50 +16,314 @@ export interface GameState {
   perfectRoll: boolean;
   countdown: number;
   gyroActive: boolean;
+  enemyHit: boolean;
 }
 
-// Track curve points for "Backyard Run"
+// Enemy types
+type EnemyType = 'ant' | 'spider' | 'beetle' | 'ladybug';
+
+class Enemy {
+  mesh: THREE.Group;
+  type: EnemyType;
+  trackT: number; // position along track (0-1)
+  lateralOffset: number; // offset from center
+  speed: number; // movement speed along track
+  direction: number; // 1 or -1
+  size: number;
+  isHit: boolean = false;
+  hitCooldown: number = 0;
+  
+  constructor(type: EnemyType, trackT: number, lateralOffset: number = 0) {
+    this.type = type;
+    this.trackT = trackT;
+    this.lateralOffset = lateralOffset;
+    this.direction = Math.random() > 0.5 ? 1 : -1;
+    
+    // Size based on type
+    switch(type) {
+      case 'ant': this.size = 0.8; this.speed = 0.03; break;
+      case 'spider': this.size = 1.2; this.speed = 0.02; break;
+      case 'beetle': this.size = 1.5; this.speed = 0.015; break;
+      case 'ladybug': this.size = 1.0; this.speed = 0.025; break;
+      default: this.size = 1; this.speed = 0.02;
+    }
+    
+    this.mesh = this.createMesh();
+  }
+  
+  private createMesh(): THREE.Group {
+    const group = new THREE.Group();
+    
+    switch(this.type) {
+      case 'ant':
+        // Black ant with segmented body
+        const antBodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 });
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), antBodyMat);
+        head.position.z = -0.4;
+        group.add(head);
+        // Thorax
+        const thorax = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), antBodyMat);
+        thorax.position.z = 0;
+        group.add(thorax);
+        // Abdomen
+        const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), antBodyMat);
+        abdomen.position.z = 0.5;
+        group.add(abdomen);
+        // Legs
+        for (let i = 0; i < 3; i++) {
+          for (let side = -1; side <= 1; side += 2) {
+            const leg = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.03, 0.02, 0.5, 4),
+              antBodyMat
+            );
+            leg.position.set(side * 0.3, -0.2, (i - 1) * 0.3);
+            leg.rotation.z = side * 0.5;
+            group.add(leg);
+          }
+        }
+        // Antennae
+        for (let side = -1; side <= 1; side += 2) {
+          const ant = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.01, 0.3, 4),
+            antBodyMat
+          );
+          ant.position.set(side * 0.1, 0.2, -0.5);
+          ant.rotation.x = -0.5;
+          ant.rotation.z = side * 0.3;
+          group.add(ant);
+        }
+        break;
+        
+      case 'spider':
+        // Brown spider with hairy legs
+        const spiderMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.8 });
+        // Body
+        const spiderBody = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6), spiderMat);
+        spiderBody.scale.set(1, 0.7, 1.2);
+        group.add(spiderBody);
+        // Head
+        const spiderHead = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), spiderMat);
+        spiderHead.position.z = -0.4;
+        group.add(spiderHead);
+        // 8 legs
+        for (let i = 0; i < 4; i++) {
+          for (let side = -1; side <= 1; side += 2) {
+            const leg = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.03, 0.02, 0.7, 4),
+              spiderMat
+            );
+            leg.position.set(side * 0.35, -0.1, (i - 1.5) * 0.2);
+            leg.rotation.z = side * 0.7;
+            leg.rotation.x = (i - 1.5) * 0.2;
+            group.add(leg);
+          }
+        }
+        // Eyes (red)
+        const eyeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0x660000 });
+        for (let side = -1; side <= 1; side += 2) {
+          const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), eyeMat);
+          eye.position.set(side * 0.1, 0.1, -0.5);
+          group.add(eye);
+        }
+        break;
+        
+      case 'beetle':
+        // Green beetle with shiny shell
+        const beetleShellMat = new THREE.MeshStandardMaterial({ 
+          color: 0x2d5a27, roughness: 0.3, metalness: 0.6 
+        });
+        const beetleBodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.7 });
+        // Shell
+        const shell = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), beetleShellMat);
+        shell.scale.set(1, 0.6, 1.3);
+        shell.position.y = 0.1;
+        group.add(shell);
+        // Body underneath
+        const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), beetleBodyMat);
+        body.scale.set(1, 0.5, 1.2);
+        group.add(body);
+        // Head
+        const beetleHead = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), beetleBodyMat);
+        beetleHead.position.z = -0.6;
+        group.add(beetleHead);
+        // Legs
+        for (let i = 0; i < 3; i++) {
+          for (let side = -1; side <= 1; side += 2) {
+            const leg = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.04, 0.03, 0.5, 4),
+              beetleBodyMat
+            );
+            leg.position.set(side * 0.4, -0.3, (i - 1) * 0.3);
+            leg.rotation.z = side * 0.6;
+            group.add(leg);
+          }
+        }
+        break;
+        
+      case 'ladybug':
+        // Red ladybug with black spots
+        const ladybugShellMat = new THREE.MeshStandardMaterial({ 
+          color: 0xcc0000, roughness: 0.4, metalness: 0.3 
+        });
+        const ladybugSpotMat = new THREE.MeshStandardMaterial({ color: 0x000000, roughness: 0.7 });
+        // Shell
+        const ladybugShell = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), ladybugShellMat);
+        ladybugShell.scale.set(1, 0.6, 1.1);
+        ladybugShell.position.y = 0.1;
+        group.add(ladybugShell);
+        // Spots
+        for (let i = 0; i < 6; i++) {
+          const spot = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 4), ladybugSpotMat);
+          const angle = (i / 6) * Math.PI * 2;
+          spot.position.set(
+            Math.cos(angle) * 0.3,
+            0.25,
+            Math.sin(angle) * 0.35
+          );
+          group.add(spot);
+        }
+        // Head
+        const ladybugHead = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), ladybugSpotMat);
+        ladybugHead.position.z = -0.45;
+        group.add(ladybugHead);
+        // Legs
+        for (let i = 0; i < 3; i++) {
+          for (let side = -1; side <= 1; side += 2) {
+            const leg = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.03, 0.02, 0.4, 4),
+              ladybugSpotMat
+            );
+            leg.position.set(side * 0.35, -0.2, (i - 1) * 0.25);
+            leg.rotation.z = side * 0.5;
+            group.add(leg);
+          }
+        }
+        break;
+    }
+    
+    group.scale.setScalar(this.size);
+    return group;
+  }
+  
+  update(dt: number, trackCurve: THREE.CatmullRomCurve3) {
+    // Move along track
+    this.trackT += this.speed * this.direction * dt;
+    
+    // Bounce at track ends
+    if (this.trackT > 0.95 || this.trackT < 0.05) {
+      this.direction *= -1;
+      this.trackT = Math.max(0.05, Math.min(0.95, this.trackT));
+    }
+    
+    // Update position
+    const point = trackCurve.getPoint(this.trackT);
+    const tangent = trackCurve.getTangent(this.trackT).normalize();
+    const right = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
+    
+    this.mesh.position.copy(point)
+      .add(right.clone().multiplyScalar(this.lateralOffset))
+      .add(new THREE.Vector3(0, 0.5, 0));
+    
+    // Orient along track
+    const lookTarget = this.mesh.position.clone().add(tangent.multiplyScalar(this.direction));
+    this.mesh.lookAt(lookTarget);
+    
+    // Animate legs (simple bobbing)
+    const time = Date.now() * 0.01;
+    this.mesh.position.y += Math.sin(time * this.speed * 100) * 0.05;
+    
+    // Hit cooldown
+    if (this.hitCooldown > 0) {
+      this.hitCooldown -= dt;
+      // Flash when hit
+      this.mesh.visible = Math.floor(this.hitCooldown * 10) % 2 === 0;
+    } else {
+      this.mesh.visible = true;
+      this.isHit = false;
+    }
+  }
+  
+  checkCollision(bugPosition: THREE.Vector3, bugHeight: number): boolean {
+    if (this.hitCooldown > 0) return false;
+    
+    const distance = this.mesh.position.distanceTo(bugPosition);
+    const collisionRadius = this.size * 0.8;
+    
+    // Only collide if bug is on the ground (not jumping over)
+    if (distance < collisionRadius && bugHeight < 1.5) {
+      this.isHit = true;
+      this.hitCooldown = 1.5; // Invulnerable for 1.5 seconds
+      return true;
+    }
+    
+    return false;
+  }
+}
+
+// Track curve points for "Backyard Run" - with more loops!
 function createTrackCurve(): THREE.CatmullRomCurve3 {
   const s = 6; // scale factor
   const points = [
     // Start - wide section for walking
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 1, -8 * s),
-    new THREE.Vector3(2 * s, 1.5, -14 * s),
+    new THREE.Vector3(0, 1, -6 * s),
+    new THREE.Vector3(0, 1, -10 * s),
     
-    // First ramp up
-    new THREE.Vector3(6 * s, 3, -16 * s),
-    new THREE.Vector3(10 * s, 6, -14 * s),
-    new THREE.Vector3(12 * s, 10, -10 * s),
+    // Loop 1 - Small vertical loop
+    new THREE.Vector3(2 * s, 2, -12 * s),
+    new THREE.Vector3(4 * s, 5, -12 * s),
+    new THREE.Vector3(5 * s, 9, -11 * s),
+    new THREE.Vector3(4 * s, 12, -9 * s),
+    new THREE.Vector3(2 * s, 9, -8 * s),
+    new THREE.Vector3(1 * s, 5, -9 * s),
     
-    // First loop (simplified - just goes up and over)
-    new THREE.Vector3(10 * s, 14, -6 * s),
-    new THREE.Vector3(6 * s, 12, -4 * s),
-    new THREE.Vector3(4 * s, 8, -6 * s),
+    // Transition to loop 2
+    new THREE.Vector3(0, 3, -7 * s),
+    new THREE.Vector3(-2 * s, 2, -5 * s),
     
-    // Transition
-    new THREE.Vector3(2 * s, 5, -8 * s),
-    new THREE.Vector3(0, 3, -6 * s),
-    
-    // Second ramp
-    new THREE.Vector3(-4 * s, 4, -4 * s),
-    new THREE.Vector3(-8 * s, 7, -2 * s),
-    new THREE.Vector3(-10 * s, 11, 0),
-    
-    // Second loop (simplified)
-    new THREE.Vector3(-8 * s, 14, 2 * s),
-    new THREE.Vector3(-4 * s, 12, 4 * s),
-    new THREE.Vector3(-2 * s, 8, 2 * s),
+    // Loop 2 - Medium loop (tilted)
+    new THREE.Vector3(-4 * s, 3, -3 * s),
+    new THREE.Vector3(-6 * s, 7, -2 * s),
+    new THREE.Vector3(-6 * s, 12, 0),
+    new THREE.Vector3(-4 * s, 15, 2 * s),
+    new THREE.Vector3(-2 * s, 12, 3 * s),
+    new THREE.Vector3(-1 * s, 7, 2 * s),
     
     // Wide section (hula roll opportunity)
-    new THREE.Vector3(0, 5, 4 * s),
-    new THREE.Vector3(4 * s, 4, 8 * s),
-    new THREE.Vector3(8 * s, 3, 10 * s),
+    new THREE.Vector3(0, 4, 4 * s),
+    new THREE.Vector3(3 * s, 3, 6 * s),
+    new THREE.Vector3(6 * s, 3, 7 * s),
     
-    // Downhill finish
-    new THREE.Vector3(12 * s, 2, 8 * s),
-    new THREE.Vector3(16 * s, 1, 6 * s),
-    new THREE.Vector3(20 * s, 1, 6 * s),
+    // Loop 3 - Large loop
+    new THREE.Vector3(9 * s, 5, 6 * s),
+    new THREE.Vector3(11 * s, 10, 4 * s),
+    new THREE.Vector3(11 * s, 16, 2 * s),
+    new THREE.Vector3(9 * s, 20, 0),
+    new THREE.Vector3(7 * s, 16, -1 * s),
+    new THREE.Vector3(6 * s, 10, 0),
+    
+    // Transition to loop 4
+    new THREE.Vector3(4 * s, 6, 2 * s),
+    new THREE.Vector3(2 * s, 4, 4 * s),
+    
+    // Loop 4 - Corkscrew loop
+    new THREE.Vector3(0, 5, 6 * s),
+    new THREE.Vector3(-2 * s, 9, 7 * s),
+    new THREE.Vector3(-3 * s, 14, 6 * s),
+    new THREE.Vector3(-2 * s, 18, 4 * s),
+    new THREE.Vector3(0, 14, 3 * s),
+    new THREE.Vector3(1 * s, 9, 4 * s),
+    
+    // Narrow bridge section
+    new THREE.Vector3(2 * s, 6, 6 * s),
+    new THREE.Vector3(4 * s, 5, 8 * s),
+    
+    // Final downhill
+    new THREE.Vector3(7 * s, 3, 10 * s),
+    new THREE.Vector3(11 * s, 2, 11 * s),
+    new THREE.Vector3(15 * s, 1, 10 * s),
+    new THREE.Vector3(18 * s, 1, 9 * s),
   ];
   return new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
 }
@@ -105,6 +369,7 @@ export class GameEngine {
     perfectRoll: false,
     countdown: 0,
     gyroActive: false,
+    enemyHit: false,
   };
 
   // Movement state
@@ -149,6 +414,9 @@ export class GameEngine {
   private checkpointMarkers: THREE.Mesh[] = [];
   private finishMarker!: THREE.Group;
 
+  // Enemies
+  private enemies: Enemy[] = [];
+  
   // Callbacks
   onStateChange?: (state: GameState) => void;
 
@@ -815,6 +1083,49 @@ export class GameEngine {
 
     // Initialize speed particles
     this.initParticles();
+    
+    // Spawn enemies along the track
+    this.spawnEnemies();
+  }
+  
+  private spawnEnemies() {
+    // Enemy positions along track (trackT values)
+    const enemySpawns: { type: EnemyType; t: number; offset: number }[] = [
+      // After first loop
+      { type: 'ant', t: 0.12, offset: 0 },
+      { type: 'ant', t: 0.14, offset: 1.5 },
+      
+      // Before second loop
+      { type: 'spider', t: 0.22, offset: -1 },
+      
+      // In wide section
+      { type: 'ladybug', t: 0.38, offset: 2 },
+      { type: 'ladybug', t: 0.40, offset: -2 },
+      
+      // Before third loop
+      { type: 'beetle', t: 0.48, offset: 0 },
+      
+      // After third loop
+      { type: 'ant', t: 0.58, offset: 1 },
+      { type: 'spider', t: 0.60, offset: -1.5 },
+      
+      // Before fourth loop
+      { type: 'beetle', t: 0.68, offset: 0.5 },
+      { type: 'ant', t: 0.70, offset: -0.5 },
+      
+      // In narrow section
+      { type: 'spider', t: 0.78, offset: 0 },
+      
+      // Final stretch
+      { type: 'ladybug', t: 0.88, offset: 1 },
+      { type: 'ant', t: 0.90, offset: -1 },
+    ];
+    
+    for (const spawn of enemySpawns) {
+      const enemy = new Enemy(spawn.type, spawn.t, spawn.offset);
+      this.enemies.push(enemy);
+      this.scene.add(enemy.mesh);
+    }
   }
 
   private initParticles() {
@@ -927,6 +1238,40 @@ export class GameEngine {
       this.finishMarker.children[0].position.y = finishPoint.y + 0.5 + Math.sin(time * 3) * 0.15;
     }
   }
+  
+  private enemyHitTimer = 0;
+  
+  private updateEnemies(dt: number) {
+    const bugPos = this.bugMesh.position.clone();
+    
+    // Update enemy hit timer
+    if (this.enemyHitTimer > 0) {
+      this.enemyHitTimer -= dt;
+      if (this.enemyHitTimer <= 0) {
+        this.state.enemyHit = false;
+      }
+    }
+    
+    for (const enemy of this.enemies) {
+      enemy.update(dt, this.trackCurve);
+      
+      // Check collision with bug
+      if (enemy.checkCollision(bugPos, this.heightAboveTrack)) {
+        // Bug hit enemy - apply knockback/wobble
+        this.bugWobble = Math.min(3, this.bugWobble + 1.5);
+        this.wobblePhase = 0;
+        this.forwardSpeed *= 0.5; // Lose half speed
+        this.lateralVelocity += (Math.random() - 0.5) * 10; // Random knockback
+        
+        // Visual feedback
+        this.bugSquash = 0.6;
+        
+        // Set enemy hit state for UI
+        this.state.enemyHit = true;
+        this.enemyHitTimer = 1.0; // Show hit indicator for 1 second
+      }
+    }
+  }
 
   private resetToStart() {
     const startPoint = this.trackCurve.getPoint(0);
@@ -1008,6 +1353,7 @@ export class GameEngine {
       this.updateCamera(dt);
       this.updateParticles(dt);
       this.updateCheckpointMarkers(dt);
+      this.updateEnemies(dt);
 
       // Step physics (for ground collision only)
       this.world.step(1 / 60, dt, 3);

@@ -18,6 +18,7 @@ function App() {
     perfectRoll: false,
     countdown: 0,
     gyroActive: false,
+    enemyHit: false,
   });
   const [screen, setScreen] = useState<'title' | 'playing' | 'finished'>('title');
   const [showControls, setShowControls] = useState(false);
@@ -165,6 +166,20 @@ function App() {
             </div>
           )}
 
+          {/* Enemy Hit */}
+          {gameState.enemyHit && (
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 pointer-events-none animate-pulse">
+              <div className="bg-red-500/80 backdrop-blur-sm rounded-xl px-6 py-3 border-2 border-red-300">
+                <div className="text-white font-bold text-2xl drop-shadow-lg">
+                  💥 OUCH! 💥
+                </div>
+                <div className="text-white/80 text-sm text-center">
+                  Jump over enemies!
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Bottom hint - hidden during countdown */}
           <div className={`absolute bottom-3 left-0 right-0 text-center pointer-events-none transition-opacity duration-500 ${gameState.countdown > 0 ? 'opacity-0' : 'opacity-100'}`}>
             <p className="text-white/25 text-[10px] font-medium">
@@ -241,8 +256,10 @@ function App() {
                   <p>• Space = Jump</p>
                   <p>• Mouse circle = Hula Roll</p>
                 </div>
-                <div className="pt-3 border-t border-white/10 text-white/40 text-[11px]">
-                  <p>💡 Bug starts walking. Flick to curl into a ball and roll faster! Lean into turns to maintain traction.</p>
+                <div className="pt-3 border-t border-white/10 text-white/40 text-[11px] space-y-1">
+                  <p>💡 Bug starts walking. Flick to curl into a ball and roll faster!</p>
+                  <p>🐜 Jump over enemies (ants, spiders, beetles, ladybugs)!</p>
+                  <p>⚡ Lean into turns to maintain traction. 4 loops to conquer!</p>
                 </div>
               </div>
             )}
