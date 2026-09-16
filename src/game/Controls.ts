@@ -8,6 +8,12 @@ export interface ControlState {
   hulaAngle: number; // accumulated angle for hula roll detection
   hulaRadius: number;
   hulaPoints: { x: number; y: number; t: number }[];
+  flickDetected: boolean;
+  flickStrength: number;
+  lastTiltX: number;
+  lastTiltY: number;
+  tiltVelocityX: number;
+  tiltVelocityY: number;
 }
 
 export class Controls {
@@ -19,6 +25,12 @@ export class Controls {
     hulaAngle: 0,
     hulaRadius: 0,
     hulaPoints: [],
+    flickDetected: false,
+    flickStrength: 0,
+    lastTiltX: 0,
+    lastTiltY: 0,
+    tiltVelocityX: 0,
+    tiltVelocityY: 0,
   };
 
   private keys: Set<string> = new Set();
@@ -46,6 +58,11 @@ export class Controls {
       if (e.key === ' ') {
         e.preventDefault();
         this.state.jump = true;
+      }
+      // F key for flick detection (desktop testing)
+      if (e.key.toLowerCase() === 'f') {
+        this.state.flickDetected = true;
+        this.state.flickStrength = 1;
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -144,6 +161,26 @@ export class Controls {
       this.state.tiltX += (kx - this.state.tiltX) * Math.min(1, dt * 8);
       this.state.tiltY += (ky - this.state.tiltY) * Math.min(1, dt * 8);
     }
+
+    // Detect flick motion (rapid tilt change)
+    const tiltDeltaX = this.state.tiltX - this.state.lastTiltX;
+    const tiltDeltaY = this.state.tiltY - this.state.lastTiltY;
+    this.state.tiltVelocityX = tiltDeltaX / dt;
+    this.state.tiltVelocityY = tiltDeltaY / dt;
+    
+    const flickMagnitude = Math.sqrt(this.state.tiltVelocityX ** 2 + this.state.tiltVelocityY ** 2);
+    
+    // Flick threshold - rapid movement
+    if (flickMagnitude > 8) {
+      this.state.flickDetected = true;
+      this.state.flickStrength = Math.min(1, flickMagnitude / 15);
+    } else {
+      this.state.flickDetected = false;
+      this.state.flickStrength *= 0.9;
+    }
+    
+    this.state.lastTiltX = this.state.tiltX;
+    this.state.lastTiltY = this.state.tiltY;
 
     // Mouse-based hula roll detection
     if (this.mouseDown) {

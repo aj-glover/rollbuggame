@@ -155,7 +155,7 @@ function App() {
           {/* Bottom hint - hidden during countdown */}
           <div className={`absolute bottom-3 left-0 right-0 text-center pointer-events-none transition-opacity duration-500 ${gameState.countdown > 0 ? 'opacity-0' : 'opacity-100'}`}>
             <p className="text-white/25 text-[10px] font-medium">
-              Tilt to balance • Tap to jump • Circle for Hula Roll
+              Tilt to balance • Flick to roll • Tap to jump
             </p>
           </div>
         </>
@@ -214,6 +214,7 @@ function App() {
                 <h3 className="text-white/90 font-bold text-sm mb-3">📱 MOBILE</h3>
                 <div className="space-y-1.5 text-white/60 text-xs mb-4">
                   <p>• Tilt device to shift weight</p>
+                  <p>• <span className="text-yellow-400">Flick phone</span> = Start rolling!</p>
                   <p>• Tap screen to jump</p>
                   <p>• Circular motion = Hula Roll</p>
                 </div>
@@ -221,11 +222,12 @@ function App() {
                 <div className="space-y-1.5 text-white/60 text-xs mb-4">
                   <p>• A/D or ←/→ = Lean left/right</p>
                   <p>• W/S or ↑/↓ = Speed control</p>
+                  <p>• <span className="text-yellow-400">F key</span> = Start rolling</p>
                   <p>• Space = Jump</p>
                   <p>• Mouse circle = Hula Roll</p>
                 </div>
                 <div className="pt-3 border-t border-white/10 text-white/40 text-[11px]">
-                  <p>💡 Lean into turns to maintain traction. Too much tilt at high speed = spin out!</p>
+                  <p>💡 Bug starts walking. Flick to curl into a ball and roll faster! Lean into turns to maintain traction.</p>
                 </div>
               </div>
             )}

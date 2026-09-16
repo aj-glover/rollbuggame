@@ -21,37 +21,40 @@ export interface GameState {
 function createTrackCurve(): THREE.CatmullRomCurve3 {
   const s = 6; // scale factor
   const points = [
+    // Start - wide section for walking
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 1, -8 * s),
-    new THREE.Vector3(3 * s, 1.5, -14 * s),
-    new THREE.Vector3(8 * s, 2, -16 * s),
-    new THREE.Vector3(12 * s, 2.5, -13 * s),
-    new THREE.Vector3(14 * s, 3, -8 * s),
-    // Jump ramp
-    new THREE.Vector3(13 * s, 4.5, -4 * s),
-    new THREE.Vector3(11 * s, 3, -1 * s),
-    // Narrow branch
-    new THREE.Vector3(8 * s, 3, 1 * s),
-    new THREE.Vector3(4 * s, 3.5, 3 * s),
-    // Banked turn
-    new THREE.Vector3(0, 4, 6 * s),
-    new THREE.Vector3(-4 * s, 5, 9 * s),
-    new THREE.Vector3(-7 * s, 6, 7 * s),
-    // Loop
-    new THREE.Vector3(-8 * s, 9, 3 * s),
-    new THREE.Vector3(-7 * s, 14, 0),
-    new THREE.Vector3(-5 * s, 17, -2 * s),
-    new THREE.Vector3(-3 * s, 14, -3 * s),
-    new THREE.Vector3(-1 * s, 9, -1 * s),
-    // Wide section (hula roll)
-    new THREE.Vector3(2 * s, 7, 2 * s),
-    new THREE.Vector3(5 * s, 6, 5 * s),
-    // Downhill
-    new THREE.Vector3(8 * s, 4, 8 * s),
-    new THREE.Vector3(12 * s, 2, 11 * s),
-    new THREE.Vector3(16 * s, 1, 13 * s),
-    // Finish
-    new THREE.Vector3(20 * s, 1, 14 * s),
+    new THREE.Vector3(0, 1, -6 * s),
+    new THREE.Vector3(0, 1, -12 * s),
+    
+    // First loop (vertical)
+    new THREE.Vector3(2 * s, 2, -14 * s),
+    new THREE.Vector3(4 * s, 6, -14 * s),
+    new THREE.Vector3(4 * s, 12, -12 * s),
+    new THREE.Vector3(2 * s, 16, -10 * s),
+    new THREE.Vector3(0, 12, -8 * s),
+    new THREE.Vector3(0, 6, -8 * s),
+    
+    // Transition to narrow section
+    new THREE.Vector3(-2 * s, 3, -6 * s),
+    new THREE.Vector3(-4 * s, 2, -4 * s),
+    
+    // Second loop (tilted corkscrew)
+    new THREE.Vector3(-6 * s, 3, -2 * s),
+    new THREE.Vector3(-8 * s, 8, 0),
+    new THREE.Vector3(-6 * s, 14, 2 * s),
+    new THREE.Vector3(-4 * s, 16, 4 * s),
+    new THREE.Vector3(-2 * s, 12, 6 * s),
+    new THREE.Vector3(-2 * s, 6, 6 * s),
+    
+    // Wide section (hula roll opportunity)
+    new THREE.Vector3(0, 4, 8 * s),
+    new THREE.Vector3(4 * s, 3, 10 * s),
+    new THREE.Vector3(8 * s, 2, 10 * s),
+    
+    // Downhill finish
+    new THREE.Vector3(12 * s, 1, 8 * s),
+    new THREE.Vector3(16 * s, 1, 6 * s),
+    new THREE.Vector3(20 * s, 1, 6 * s),
   ];
   return new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.5);
 }
@@ -105,7 +108,8 @@ export class GameEngine {
   private verticalVelocity = 0;
   private heightAboveTrack = 0;
   private forwardSpeed = 0;
-  private baseSpeed = 20;
+  private baseSpeed = 12; // Slower walking speed
+  private rollSpeed = 25; // Faster rolling speed
   private isGrounded = true;
   private wasGrounded = true;
   private isRolling = false;
@@ -119,6 +123,14 @@ export class GameEngine {
   // Camera
   private cameraPos = new THREE.Vector3();
   private cameraLookAt = new THREE.Vector3();
+  
+  // Rattling/shaking (spray can effect)
+  private rattleTime = 0;
+  private rattleIntensity = 0.02;
+  
+  // Bug state
+  private isWalking = true; // Start in walking mode
+  private rollTransition = 0; // 0 = walking, 1 = fully rolled
 
   // Particles
   private speedParticles!: THREE.Points;
@@ -241,7 +253,7 @@ export class GameEngine {
 
     // Build track surface as a tube-like ribbon
     const segments = 600;
-    const trackWidth = 4;
+    const trackWidth = 6; // Wider base track
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
@@ -266,10 +278,12 @@ export class GameEngine {
       
       const bankedRight = right.clone().applyAxisAngle(tangent, bankAngle * 0.3);
 
-      // Width variation
+      // Width variation - dramatic changes
       let w = trackWidth;
-      if (t > 0.33 && t < 0.40) w = 2; // Narrow
-      if (t > 0.58 && t < 0.68) w = 6; // Wide
+      if (t < 0.15) w = 8; // Very wide start (walking section)
+      else if (t > 0.25 && t < 0.35) w = 2.5; // Narrow branch section
+      else if (t > 0.55 && t < 0.70) w = 9; // Very wide (hula roll zone)
+      else if (t > 0.80 && t < 0.85) w = 3; // Narrow finish approach
 
       // Section color
       let color = new THREE.Color(0x8B6914); // Default: root/branch brown
@@ -418,9 +432,11 @@ export class GameEngine {
       const point = this.trackCurve.getPoint(t);
       const tangent = this.trackCurve.getTangent(t).normalize();
       
-      let w = 4;
-      if (t > 0.33 && t < 0.40) w = 2;
-      if (t > 0.58 && t < 0.68) w = 6;
+      let w = 6;
+      if (t < 0.15) w = 8;
+      else if (t > 0.25 && t < 0.35) w = 2.5;
+      else if (t > 0.55 && t < 0.70) w = 9;
+      else if (t > 0.80 && t < 0.85) w = 3;
 
       const body = new CANNON.Body({
         mass: 0,
@@ -907,6 +923,8 @@ export class GameEngine {
     this.forwardSpeed = this.baseSpeed;
     this.isGrounded = true;
     this.isRolling = false;
+    this.isWalking = true; // Start in walking mode
+    this.rollTransition = 0;
     this.state.currentCheckpoint = 0;
     this.state.time = 0;
     this.state.isFinished = false;
@@ -979,7 +997,9 @@ export class GameEngine {
     const tiltY = this.controls.state.tiltY;
 
     // Forward speed management
-    let targetSpeed = this.baseSpeed;
+    // Use different base speed for walking vs rolling
+    const currentBaseSpeed = this.isRolling ? this.rollSpeed : this.baseSpeed;
+    let targetSpeed = currentBaseSpeed;
     targetSpeed += tiltY * 12; // Lean forward/back
     
     // Track slope affects speed
@@ -1022,9 +1042,11 @@ export class GameEngine {
     const up = new THREE.Vector3(0, 1, 0);
 
     // Track width at current position
-    let trackWidth = 4;
-    if (this.trackT > 0.33 && this.trackT < 0.40) trackWidth = 2;
-    if (this.trackT > 0.58 && this.trackT < 0.68) trackWidth = 6;
+    let trackWidth = 6;
+    if (this.trackT < 0.15) trackWidth = 8;
+    else if (this.trackT > 0.25 && this.trackT < 0.35) trackWidth = 2.5;
+    else if (this.trackT > 0.55 && this.trackT < 0.70) trackWidth = 9;
+    else if (this.trackT > 0.80 && this.trackT < 0.85) trackWidth = 3;
 
     // Lateral physics (weight shifting)
     // Tilt moves center of mass laterally
@@ -1154,6 +1176,16 @@ export class GameEngine {
     const right = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0)).normalize();
     const up = new THREE.Vector3(0, 1, 0);
 
+    // Handle walking/rolling transition based on flick
+    if (this.controls.state.flickDetected && this.controls.state.flickStrength > 0.5) {
+      this.isWalking = false;
+      this.isRolling = true;
+    }
+    
+    // Smooth transition
+    const targetRoll = this.isRolling ? 1 : 0;
+    this.rollTransition += (targetRoll - this.rollTransition) * dt * 3;
+
     // Position
     const bugPos = point.clone()
       .add(right.clone().multiplyScalar(this.lateralOffset))
@@ -1169,14 +1201,17 @@ export class GameEngine {
     const leanAngle = -this.controls.state.tiltX * 0.3;
     this.bugMesh.rotateZ(leanAngle);
 
-    // Leg animation
+    // Leg animation (more visible when walking, hidden when rolling)
     this.legTime += dt * (4 + this.forwardSpeed * 0.3);
+    const legVisibility = 1 - this.rollTransition; // Legs visible when walking
     for (let i = 0; i < this.bugLegs.length; i++) {
       const leg = this.bugLegs[i];
       const phase = i * 0.6;
       const scramble = this.forwardSpeed > 30 ? 2.5 : 1;
-      leg.rotation.x = Math.sin(this.legTime * 2 + phase) * 0.4 * scramble;
-      leg.position.y = -0.35 + Math.abs(Math.sin(this.legTime * 2 + phase)) * 0.08 * scramble;
+      leg.rotation.x = Math.sin(this.legTime * 2 + phase) * 0.4 * scramble * legVisibility;
+      leg.position.y = -0.35 + Math.abs(Math.sin(this.legTime * 2 + phase)) * 0.08 * scramble * legVisibility;
+      // Tuck legs in when rolling
+      leg.scale.setScalar(legVisibility);
     }
 
     // Squash/stretch
@@ -1188,17 +1223,27 @@ export class GameEngine {
       0.9 * (2 - this.bugSquash)
     );
 
-    // Rolling state
-    if (this.isRolling) {
+    // Rolling state - curl into ball
+    if (this.rollTransition > 0.1) {
       this.bugMesh.rotateX(dt * this.forwardSpeed * 0.15);
       for (const seg of this.bugSegments) {
-        seg.scale.lerp(new THREE.Vector3(1.3, 1.3, 0.7), dt * 6);
+        const targetScale = new THREE.Vector3(
+          1 + 0.3 * this.rollTransition,
+          1 + 0.3 * this.rollTransition,
+          1 - 0.3 * this.rollTransition
+        );
+        seg.scale.lerp(targetScale, dt * 6);
       }
     } else {
       for (const seg of this.bugSegments) {
         seg.scale.lerp(new THREE.Vector3(1, 1, 1), dt * 6);
       }
     }
+
+    // Rattling effect on bug mesh (spray can shake)
+    const bugRattle = this.rattleIntensity * (0.3 + Math.min(1, this.forwardSpeed / 50) * 0.7);
+    this.bugMesh.position.x += Math.sin(this.rattleTime * 1.5) * bugRattle * 2;
+    this.bugMesh.position.y += Math.cos(this.rattleTime * 1.8) * bugRattle * 2;
 
     // Wobble
     if (this.bugWobble > 0.01) {
@@ -1246,12 +1291,19 @@ export class GameEngine {
     this.camera.fov += (targetFOV - this.camera.fov) * dt * 3;
     this.camera.updateProjectionMatrix();
 
-    // Subtle camera shake at high speed
-    if (this.forwardSpeed > 40) {
-      const intensity = (this.forwardSpeed - 40) / 60 * 0.08;
-      this.camera.position.x += (Math.random() - 0.5) * intensity;
-      this.camera.position.y += (Math.random() - 0.5) * intensity;
-    }
+    // Rattling/shaking effect (spray can feel)
+    this.rattleTime += dt * 30; // High frequency
+    const rattleX = Math.sin(this.rattleTime * 1.3) * this.rattleIntensity;
+    const rattleY = Math.cos(this.rattleTime * 1.7) * this.rattleIntensity;
+    const rattleZ = Math.sin(this.rattleTime * 2.1) * this.rattleIntensity * 0.5;
+    
+    // Intensity increases with speed
+    const speedRattle = Math.min(1, this.forwardSpeed / 60);
+    const totalRattle = this.rattleIntensity * (0.5 + speedRattle * 1.5);
+    
+    this.camera.position.x += rattleX * totalRattle * 10;
+    this.camera.position.y += rattleY * totalRattle * 10;
+    this.camera.position.z += rattleZ * totalRattle * 5;
   }
 
   private onResize() {
