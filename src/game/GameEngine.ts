@@ -15,6 +15,7 @@ export interface GameState {
   hulaBoostActive: boolean;
   perfectRoll: boolean;
   countdown: number;
+  gyroActive: boolean;
 }
 
 // Track curve points for "Backyard Run"
@@ -103,6 +104,7 @@ export class GameEngine {
     hulaBoostActive: false,
     perfectRoll: false,
     countdown: 0,
+    gyroActive: false,
   };
 
   // Movement state
@@ -970,6 +972,14 @@ export class GameEngine {
   async requestGyroPermission(): Promise<boolean> {
     return this.controls.requestGyroPermission();
   }
+  
+  get isGyroActive(): boolean {
+    return this.controls.isGyroActive;
+  }
+  
+  get isGyroAvailable(): boolean {
+    return this.controls.isGyroAvailable;
+  }
 
   private animate = () => {
     this.animationId = requestAnimationFrame(this.animate);
@@ -1006,6 +1016,7 @@ export class GameEngine {
 
       this.state.speed = this.forwardSpeed;
       this.state.countdown = this.countdown;
+      this.state.gyroActive = this.controls.isGyroActive;
       this.onStateChange?.({ ...this.state });
     } catch (error) {
       console.error('Animation loop error:', error);

@@ -14,6 +14,7 @@ export interface ControlState {
   lastTiltY: number;
   tiltVelocityX: number;
   tiltVelocityY: number;
+  gyroAvailable: boolean;
 }
 
 export class Controls {
@@ -31,11 +32,14 @@ export class Controls {
     lastTiltY: 0,
     tiltVelocityX: 0,
     tiltVelocityY: 0,
+    gyroAvailable: false,
   };
 
   private keys: Set<string> = new Set();
   private hasGyro = false;
   private gyroPermissionGranted = false;
+  private gyroListenerAttached = false;
+  private gyroActive = false;
   
   // Touch state
   private touchStartX = 0;
@@ -54,18 +58,23 @@ export class Controls {
   
   // Flick debounce
   private flickCooldown = 0;
-  private readonly FLICK_COOLDOWN_TIME = 0.8; // seconds between flicks
-  private readonly FLICK_THRESHOLD = 6; // minimum velocity to count as flick
+  private readonly FLICK_COOLDOWN_TIME = 0.8;
+  private readonly FLICK_THRESHOLD = 6;
   
-  // Jump buffer - stores jump requests for one frame
+  // Input buffering
   private jumpRequested = false;
   private flickRequested = false;
+  
+  // Gyro calibration
+  private gyroBaseX = 0;
+  private gyroBaseY = 0;
+  private isCalibrated = false;
 
   constructor() {
     this.setupKeyboard();
     this.setupTouch();
     this.setupMouse();
-    this.setupGyroscope();
+    this.detectGyroscope();
   }
 
   private setupKeyboard() {
@@ -78,9 +87,13 @@ export class Controls {
         this.jumpRequested = true;
       }
       
-      // F key for flick detection (desktop testing)
       if (key === 'f') {
         this.flickRequested = true;
+      }
+      
+      // Calibrate gyro (C key)
+      if (key === 'c' && this.gyroActive) {
+        this.calibrateGyro();
       }
     });
     
@@ -102,6 +115,7 @@ export class Controls {
 
     window.addEventListener('touchend', (e) => {
       const dt = Date.now() - this.touchStartTime;
+      
       // Quick tap = jump
       if (dt < 250) {
         this.jumpRequested = true;
@@ -180,63 +194,120 @@ export class Controls {
     });
   }
 
-  async setupGyroscope() {
+  private detectGyroscope() {
+    // Check if device has gyroscope capability
     if ('DeviceOrientationEvent' in window) {
+      this.hasGyro = true;
+      this.state.gyroAvailable = true;
+      
       const DOE = DeviceOrientationEvent as any;
+      
+      // iOS 13+ requires permission request
       if (typeof DOE.requestPermission === 'function') {
-        // iOS 13+ requires explicit permission
-        this.hasGyro = true;
-      } else if ('ondeviceorientation' in window) {
-        // Android and older iOS
-        this.hasGyro = true;
+        console.log('iOS device detected - gyro permission required');
+        // Don't attach listener yet, wait for permission
+      } else {
+        // Android and older iOS - gyro works without permission
+        console.log('Android/older iOS detected - gyro available');
         this.gyroPermissionGranted = true;
         this.attachGyroListener();
       }
+    } else {
+      console.log('No gyroscope detected - using keyboard/touch controls');
+      this.hasGyro = false;
+      this.state.gyroAvailable = false;
     }
   }
 
   private attachGyroListener() {
+    if (this.gyroListenerAttached) return;
+    
+    console.log('Attaching gyroscope listener');
+    
     window.addEventListener('deviceorientation', (e: DeviceOrientationEvent) => {
+      // Only process if gyro is active
+      if (!this.gyroPermissionGranted) return;
+      
       if (e.gamma !== null && e.beta !== null) {
-        // gamma: left/right tilt (-90 to 90)
-        // beta: front/back tilt (-180 to 180)
-        this.state.tiltX = Math.max(-1, Math.min(1, e.gamma / 45));
-        // Subtract 45 from beta to account for typical phone holding angle
-        this.state.tiltY = Math.max(-1, Math.min(1, (e.beta - 45) / 45));
+        this.gyroActive = true;
+        // gamma: left/right tilt (-90 to 90 degrees)
+        // beta: front/back tilt (-180 to 180 degrees)
+        
+        // Apply calibration offset
+        const rawX = e.gamma - this.gyroBaseX;
+        const rawY = e.beta - this.gyroBaseY;
+        
+        // Normalize to -1 to 1 range
+        // gamma: -45 to 45 degrees maps to -1 to 1
+        // beta: 0 to 90 degrees maps to -1 to 1 (assuming phone held upright)
+        this.state.tiltX = Math.max(-1, Math.min(1, rawX / 45));
+        this.state.tiltY = Math.max(-1, Math.min(1, (rawY - 45) / 45));
+        
+        // Auto-calibrate on first reading
+        if (!this.isCalibrated) {
+          this.gyroBaseX = e.gamma;
+          this.gyroBaseY = e.beta;
+          this.isCalibrated = true;
+          console.log('Gyro auto-calibrated');
+        }
       }
-    });
+    }, { passive: true });
+    
+    this.gyroListenerAttached = true;
   }
 
   async requestGyroPermission(): Promise<boolean> {
+    if (!this.hasGyro) {
+      console.log('No gyroscope available');
+      return false;
+    }
+    
     const DOE = DeviceOrientationEvent as any;
+    
+    // iOS 13+ requires explicit permission
     if (typeof DOE.requestPermission === 'function') {
       try {
+        console.log('Requesting gyroscope permission...');
         const permission = await DOE.requestPermission();
+        
         if (permission === 'granted') {
+          console.log('Gyroscope permission granted');
           this.gyroPermissionGranted = true;
           this.attachGyroListener();
           return true;
+        } else {
+          console.log('Gyroscope permission denied');
+          return false;
         }
-      } catch (e) {
-        console.error('Gyro permission denied', e);
+      } catch (error) {
+        console.error('Error requesting gyroscope permission:', error);
+        return false;
       }
-      return false;
+    } else {
+      // Non-iOS devices - already set up in detectGyroscope
+      return this.gyroPermissionGranted;
     }
-    // Non-iOS devices don't need permission
-    return this.hasGyro;
+  }
+
+  private calibrateGyro() {
+    // Reset calibration to current orientation
+    this.gyroBaseX = this.state.tiltX * 45 + this.gyroBaseX;
+    this.gyroBaseY = this.state.tiltY * 45 + 45 + this.gyroBaseY;
+    this.isCalibrated = true;
+    console.log('Gyro manually calibrated');
   }
 
   update(dt: number) {
-    // Clamp dt to prevent division issues
     const safeDt = Math.max(0.001, dt);
     
     // === TILT INPUT ===
-    // Use gyro if available, otherwise keyboard
-    if (this.gyroPermissionGranted && this.hasGyro) {
-      // Gyro input is set by event listener, just apply smoothing
-      // No keyboard override when gyro is active
+    if (this.gyroActive) {
+      // Gyro is active - values are set by event listener
+      // Apply smoothing to reduce jitter
+      const smoothing = Math.min(1, safeDt * 15);
+      // Smooth values are already applied in the event listener
     } else {
-      // Keyboard simulation of tilt
+      // Fallback to keyboard controls
       let kx = 0;
       let ky = 0;
       if (this.keys.has('a') || this.keys.has('arrowleft')) kx -= 1;
@@ -244,26 +315,23 @@ export class Controls {
       if (this.keys.has('w') || this.keys.has('arrowup')) ky += 1;
       if (this.keys.has('s') || this.keys.has('arrowdown')) ky -= 1;
       
-      // Smooth keyboard tilt (responsive but not instant)
       const smoothing = Math.min(1, safeDt * 10);
       this.state.tiltX += (kx - this.state.tiltX) * smoothing;
       this.state.tiltY += (ky - this.state.tiltY) * smoothing;
     }
 
     // === FLICK DETECTION ===
-    // Decrement cooldown
     if (this.flickCooldown > 0) {
       this.flickCooldown -= safeDt;
     }
     
-    // Check for requested flicks (from keyboard F, touch swipe, or mouse movement)
     if (this.flickRequested && this.flickCooldown <= 0) {
       this.state.flickDetected = true;
       this.state.flickStrength = 1;
       this.flickCooldown = this.FLICK_COOLDOWN_TIME;
       this.flickRequested = false;
     } else {
-      // Also detect flick from gyro velocity (rapid phone movement)
+      // Detect flick from gyro velocity
       const tiltDeltaX = this.state.tiltX - this.state.lastTiltX;
       const tiltDeltaY = this.state.tiltY - this.state.lastTiltY;
       this.state.tiltVelocityX = tiltDeltaX / safeDt;
@@ -279,7 +347,6 @@ export class Controls {
         this.flickCooldown = this.FLICK_COOLDOWN_TIME;
       } else {
         this.state.flickDetected = false;
-        // Decay flick strength smoothly
         this.state.flickStrength *= Math.max(0, 1 - safeDt * 5);
         if (this.state.flickStrength < 0.05) {
           this.state.flickStrength = 0;
@@ -287,7 +354,6 @@ export class Controls {
       }
     }
     
-    // Store for next frame velocity calculation
     this.state.lastTiltX = this.state.tiltX;
     this.state.lastTiltY = this.state.tiltY;
 
@@ -295,7 +361,6 @@ export class Controls {
     this.detectHulaRoll();
 
     // === JUMP ===
-    // Transfer buffered jump to state (consumed by game engine, then cleared)
     this.state.jump = this.jumpRequested;
     this.jumpRequested = false;
   }
@@ -303,13 +368,11 @@ export class Controls {
   private detectHulaRoll() {
     const points = this.state.hulaPoints;
     
-    // Need minimum points for detection
     if (points.length < 8) {
       this.state.hulaRoll = false;
       return;
     }
 
-    // Calculate center of motion
     let cx = 0, cy = 0;
     for (const p of points) { 
       cx += p.x; 
@@ -318,14 +381,12 @@ export class Controls {
     cx /= points.length;
     cy /= points.length;
 
-    // Calculate average radius
     let radius = 0;
     for (const p of points) {
       radius += Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
     }
     radius /= points.length;
 
-    // Check circularity (how consistent the radius is)
     let variance = 0;
     for (const p of points) {
       const r = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
@@ -337,8 +398,6 @@ export class Controls {
     const circularity = radius > 0 ? 1 - Math.min(1, stdDev / radius) : 0;
 
     this.state.hulaRadius = radius;
-    
-    // Must have reasonable radius AND be circular
     this.state.hulaRoll = radius > 60 && circularity > 0.55;
   }
 
@@ -347,6 +406,14 @@ export class Controls {
   }
 
   get isMobile(): boolean {
+    return this.hasGyro;
+  }
+  
+  get isGyroActive(): boolean {
+    return this.gyroActive;
+  }
+  
+  get isGyroAvailable(): boolean {
     return this.hasGyro;
   }
 }

@@ -17,6 +17,7 @@ function App() {
     hulaBoostActive: false,
     perfectRoll: false,
     countdown: 0,
+    gyroActive: false,
   });
   const [screen, setScreen] = useState<'title' | 'playing' | 'finished'>('title');
   const [showControls, setShowControls] = useState(false);
@@ -167,7 +168,9 @@ function App() {
           {/* Bottom hint - hidden during countdown */}
           <div className={`absolute bottom-3 left-0 right-0 text-center pointer-events-none transition-opacity duration-500 ${gameState.countdown > 0 ? 'opacity-0' : 'opacity-100'}`}>
             <p className="text-white/25 text-[10px] font-medium">
-              Tilt to balance • Flick to roll • Tap to jump
+              {gameState.gyroActive 
+                ? '📱 Tilt to balance • Flick to roll • Tap to jump' 
+                : '⌨️ A/D to lean • F to roll • Space to jump'}
             </p>
           </div>
         </>
