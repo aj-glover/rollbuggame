@@ -5,7 +5,7 @@ export interface ControlState {
   tiltY: number; // -1 to 1 (forward/back lean)
   jump: boolean;
   hulaRoll: boolean;
-  hulaAngle: number; // accumulated angle for hula roll detection
+  hulaAngle: number;
   hulaRadius: number;
   hulaPoints: { x: number; y: number; t: number }[];
   flickDetected: boolean;
@@ -36,14 +36,30 @@ export class Controls {
   private keys: Set<string> = new Set();
   private hasGyro = false;
   private gyroPermissionGranted = false;
+  
+  // Touch state
   private touchStartX = 0;
   private touchStartY = 0;
   private touchStartTime = 0;
+  private lastTouchX = 0;
+  private lastTouchY = 0;
+  private lastTouchTime = 0;
+  
+  // Mouse state
   private mouseDown = false;
   private mouseX = 0;
   private mouseY = 0;
   private lastMouseX = 0;
   private lastMouseY = 0;
+  
+  // Flick debounce
+  private flickCooldown = 0;
+  private readonly FLICK_COOLDOWN_TIME = 0.8; // seconds between flicks
+  private readonly FLICK_THRESHOLD = 6; // minimum velocity to count as flick
+  
+  // Jump buffer - stores jump requests for one frame
+  private jumpRequested = false;
+  private flickRequested = false;
 
   constructor() {
     this.setupKeyboard();
@@ -54,17 +70,20 @@ export class Controls {
 
   private setupKeyboard() {
     window.addEventListener('keydown', (e) => {
-      this.keys.add(e.key.toLowerCase());
-      if (e.key === ' ') {
+      const key = e.key.toLowerCase();
+      this.keys.add(key);
+      
+      if (e.key === ' ' || key === 'space') {
         e.preventDefault();
-        this.state.jump = true;
+        this.jumpRequested = true;
       }
+      
       // F key for flick detection (desktop testing)
-      if (e.key.toLowerCase() === 'f') {
-        this.state.flickDetected = true;
-        this.state.flickStrength = 1;
+      if (key === 'f') {
+        this.flickRequested = true;
       }
     });
+    
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.key.toLowerCase());
     });
@@ -76,33 +95,88 @@ export class Controls {
       this.touchStartX = touch.clientX;
       this.touchStartY = touch.clientY;
       this.touchStartTime = Date.now();
-    });
+      this.lastTouchX = touch.clientX;
+      this.lastTouchY = touch.clientY;
+      this.lastTouchTime = Date.now();
+    }, { passive: true });
 
     window.addEventListener('touchend', (e) => {
       const dt = Date.now() - this.touchStartTime;
-      if (dt < 200) {
-        this.state.jump = true;
+      // Quick tap = jump
+      if (dt < 250) {
+        this.jumpRequested = true;
       }
-    });
+      
+      // Check for touch flick (fast swipe)
+      if (e.changedTouches.length > 0) {
+        const endTouch = e.changedTouches[0];
+        const swipeDt = (Date.now() - this.lastTouchTime) / 1000;
+        if (swipeDt > 0 && swipeDt < 0.3) {
+          const dx = endTouch.clientX - this.lastTouchX;
+          const dy = endTouch.clientY - this.lastTouchY;
+          const swipeSpeed = Math.sqrt(dx * dx + dy * dy) / swipeDt;
+          if (swipeSpeed > 2000) {
+            this.flickRequested = true;
+          }
+        }
+      }
+    }, { passive: true });
 
     window.addEventListener('touchmove', (e) => {
-      // Track circular motion for hula roll
       const touch = e.touches[0];
       const now = Date.now();
+      
+      // Track for hula roll (circular motion)
       this.state.hulaPoints.push({ x: touch.clientX, y: touch.clientY, t: now });
-      // Keep only recent points
       this.state.hulaPoints = this.state.hulaPoints.filter(p => now - p.t < 1000);
-    });
+      
+      // Track for flick detection (velocity)
+      const moveDt = (now - this.lastTouchTime) / 1000;
+      if (moveDt > 0.001) {
+        const dx = touch.clientX - this.lastTouchX;
+        const dy = touch.clientY - this.lastTouchY;
+        const speed = Math.sqrt(dx * dx + dy * dy) / moveDt;
+        if (speed > 3000) {
+          this.flickRequested = true;
+        }
+      }
+      
+      this.lastTouchX = touch.clientX;
+      this.lastTouchY = touch.clientY;
+      this.lastTouchTime = now;
+    }, { passive: true });
   }
 
   private setupMouse() {
-    window.addEventListener('mousedown', () => { this.mouseDown = true; });
-    window.addEventListener('mouseup', () => { this.mouseDown = false; });
+    window.addEventListener('mousedown', (e) => { 
+      this.mouseDown = true;
+      this.lastMouseX = e.clientX;
+      this.lastMouseY = e.clientY;
+    });
+    
+    window.addEventListener('mouseup', () => { 
+      this.mouseDown = false; 
+    });
+    
     window.addEventListener('mousemove', (e) => {
-      this.lastMouseX = this.mouseX;
-      this.lastMouseY = this.mouseY;
-      this.mouseX = e.clientX;
-      this.mouseY = e.clientY;
+      const now = Date.now();
+      
+      // Track for hula roll when mouse is down
+      if (this.mouseDown) {
+        this.state.hulaPoints.push({ x: e.clientX, y: e.clientY, t: now });
+        this.state.hulaPoints = this.state.hulaPoints.filter(p => now - p.t < 1500);
+      }
+      
+      // Track for mouse flick (fast movement)
+      const dx = e.clientX - this.lastMouseX;
+      const dy = e.clientY - this.lastMouseY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 100) {
+        this.flickRequested = true;
+      }
+      
+      this.lastMouseX = e.clientX;
+      this.lastMouseY = e.clientY;
     });
   }
 
@@ -110,19 +184,27 @@ export class Controls {
     if ('DeviceOrientationEvent' in window) {
       const DOE = DeviceOrientationEvent as any;
       if (typeof DOE.requestPermission === 'function') {
-        // iOS 13+
+        // iOS 13+ requires explicit permission
         this.hasGyro = true;
       } else if ('ondeviceorientation' in window) {
+        // Android and older iOS
         this.hasGyro = true;
         this.gyroPermissionGranted = true;
-        window.addEventListener('deviceorientation', (e: DeviceOrientationEvent) => {
-          if (e.gamma !== null && e.beta !== null) {
-            this.state.tiltX = Math.max(-1, Math.min(1, e.gamma / 45));
-            this.state.tiltY = Math.max(-1, Math.min(1, (e.beta - 45) / 45));
-          }
-        });
+        this.attachGyroListener();
       }
     }
+  }
+
+  private attachGyroListener() {
+    window.addEventListener('deviceorientation', (e: DeviceOrientationEvent) => {
+      if (e.gamma !== null && e.beta !== null) {
+        // gamma: left/right tilt (-90 to 90)
+        // beta: front/back tilt (-180 to 180)
+        this.state.tiltX = Math.max(-1, Math.min(1, e.gamma / 45));
+        // Subtract 45 from beta to account for typical phone holding angle
+        this.state.tiltY = Math.max(-1, Math.min(1, (e.beta - 45) / 45));
+      }
+    });
   }
 
   async requestGyroPermission(): Promise<boolean> {
@@ -132,12 +214,7 @@ export class Controls {
         const permission = await DOE.requestPermission();
         if (permission === 'granted') {
           this.gyroPermissionGranted = true;
-          window.addEventListener('deviceorientation', (e: DeviceOrientationEvent) => {
-            if (e.gamma !== null && e.beta !== null) {
-              this.state.tiltX = Math.max(-1, Math.min(1, e.gamma / 45));
-              this.state.tiltY = Math.max(-1, Math.min(1, (e.beta - 45) / 45));
-            }
-          });
+          this.attachGyroListener();
           return true;
         }
       } catch (e) {
@@ -145,67 +222,99 @@ export class Controls {
       }
       return false;
     }
-    return false;
+    // Non-iOS devices don't need permission
+    return this.hasGyro;
   }
 
   update(dt: number) {
-    // Keyboard simulation of tilt
-    if (!this.gyroPermissionGranted || !this.hasGyro) {
+    // Clamp dt to prevent division issues
+    const safeDt = Math.max(0.001, dt);
+    
+    // === TILT INPUT ===
+    // Use gyro if available, otherwise keyboard
+    if (this.gyroPermissionGranted && this.hasGyro) {
+      // Gyro input is set by event listener, just apply smoothing
+      // No keyboard override when gyro is active
+    } else {
+      // Keyboard simulation of tilt
       let kx = 0;
       let ky = 0;
       if (this.keys.has('a') || this.keys.has('arrowleft')) kx -= 1;
       if (this.keys.has('d') || this.keys.has('arrowright')) kx += 1;
       if (this.keys.has('w') || this.keys.has('arrowup')) ky += 1;
       if (this.keys.has('s') || this.keys.has('arrowdown')) ky -= 1;
-      // Smooth keyboard tilt
-      this.state.tiltX += (kx - this.state.tiltX) * Math.min(1, dt * 8);
-      this.state.tiltY += (ky - this.state.tiltY) * Math.min(1, dt * 8);
+      
+      // Smooth keyboard tilt (responsive but not instant)
+      const smoothing = Math.min(1, safeDt * 10);
+      this.state.tiltX += (kx - this.state.tiltX) * smoothing;
+      this.state.tiltY += (ky - this.state.tiltY) * smoothing;
     }
 
-    // Detect flick motion (rapid tilt change)
-    const tiltDeltaX = this.state.tiltX - this.state.lastTiltX;
-    const tiltDeltaY = this.state.tiltY - this.state.lastTiltY;
-    this.state.tiltVelocityX = tiltDeltaX / dt;
-    this.state.tiltVelocityY = tiltDeltaY / dt;
-    
-    const flickMagnitude = Math.sqrt(this.state.tiltVelocityX ** 2 + this.state.tiltVelocityY ** 2);
-    
-    // Flick threshold - rapid movement
-    if (flickMagnitude > 8) {
-      this.state.flickDetected = true;
-      this.state.flickStrength = Math.min(1, flickMagnitude / 15);
-    } else {
-      this.state.flickDetected = false;
-      this.state.flickStrength *= 0.9;
+    // === FLICK DETECTION ===
+    // Decrement cooldown
+    if (this.flickCooldown > 0) {
+      this.flickCooldown -= safeDt;
     }
     
+    // Check for requested flicks (from keyboard F, touch swipe, or mouse movement)
+    if (this.flickRequested && this.flickCooldown <= 0) {
+      this.state.flickDetected = true;
+      this.state.flickStrength = 1;
+      this.flickCooldown = this.FLICK_COOLDOWN_TIME;
+      this.flickRequested = false;
+    } else {
+      // Also detect flick from gyro velocity (rapid phone movement)
+      const tiltDeltaX = this.state.tiltX - this.state.lastTiltX;
+      const tiltDeltaY = this.state.tiltY - this.state.lastTiltY;
+      this.state.tiltVelocityX = tiltDeltaX / safeDt;
+      this.state.tiltVelocityY = tiltDeltaY / safeDt;
+      
+      const flickMagnitude = Math.sqrt(
+        this.state.tiltVelocityX ** 2 + this.state.tiltVelocityY ** 2
+      );
+      
+      if (flickMagnitude > this.FLICK_THRESHOLD && this.flickCooldown <= 0) {
+        this.state.flickDetected = true;
+        this.state.flickStrength = Math.min(1, flickMagnitude / 12);
+        this.flickCooldown = this.FLICK_COOLDOWN_TIME;
+      } else {
+        this.state.flickDetected = false;
+        // Decay flick strength smoothly
+        this.state.flickStrength *= Math.max(0, 1 - safeDt * 5);
+        if (this.state.flickStrength < 0.05) {
+          this.state.flickStrength = 0;
+        }
+      }
+    }
+    
+    // Store for next frame velocity calculation
     this.state.lastTiltX = this.state.tiltX;
     this.state.lastTiltY = this.state.tiltY;
 
-    // Mouse-based hula roll detection
-    if (this.mouseDown) {
-      const now = Date.now();
-      this.state.hulaPoints.push({ x: this.mouseX, y: this.mouseY, t: now });
-      this.state.hulaPoints = this.state.hulaPoints.filter(p => now - p.t < 1500);
-    }
-
-    // Detect hula roll from circular motion
+    // === HULA ROLL DETECTION ===
     this.detectHulaRoll();
 
-    // Reset single-frame inputs
-    this.state.jump = false;
+    // === JUMP ===
+    // Transfer buffered jump to state (consumed by game engine, then cleared)
+    this.state.jump = this.jumpRequested;
+    this.jumpRequested = false;
   }
 
   private detectHulaRoll() {
     const points = this.state.hulaPoints;
-    if (points.length < 10) {
+    
+    // Need minimum points for detection
+    if (points.length < 8) {
       this.state.hulaRoll = false;
       return;
     }
 
     // Calculate center of motion
     let cx = 0, cy = 0;
-    for (const p of points) { cx += p.x; cy += p.y; }
+    for (const p of points) { 
+      cx += p.x; 
+      cy += p.y; 
+    }
     cx /= points.length;
     cy /= points.length;
 
@@ -216,7 +325,7 @@ export class Controls {
     }
     radius /= points.length;
 
-    // Check if points form a circle (consistent radius)
+    // Check circularity (how consistent the radius is)
     let variance = 0;
     for (const p of points) {
       const r = Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
@@ -225,10 +334,12 @@ export class Controls {
     variance /= points.length;
 
     const stdDev = Math.sqrt(variance);
-    const circularity = 1 - Math.min(1, stdDev / (radius + 1));
+    const circularity = radius > 0 ? 1 - Math.min(1, stdDev / radius) : 0;
 
     this.state.hulaRadius = radius;
-    this.state.hulaRoll = radius > 50 && circularity > 0.5;
+    
+    // Must have reasonable radius AND be circular
+    this.state.hulaRoll = radius > 60 && circularity > 0.55;
   }
 
   get hasGyroPermission(): boolean {
