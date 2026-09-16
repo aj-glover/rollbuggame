@@ -19,8 +19,11 @@ function App() {
     countdown: 0,
     gyroActive: false,
     enemyHit: false,
+    lives: 3,
+    maxLives: 3,
+    gameOver: false,
   });
-  const [screen, setScreen] = useState<'title' | 'playing' | 'finished'>('title');
+  const [screen, setScreen] = useState<'title' | 'playing' | 'finished' | 'gameover'>('title');
   const [showControls, setShowControls] = useState(false);
 
   const startGame = useCallback(async () => {
@@ -53,7 +56,9 @@ function App() {
 
         engine.onStateChange = (state) => {
           setGameState(state);
-          if (state.isFinished) {
+          if (state.gameOver) {
+            setScreen('gameover');
+          } else if (state.isFinished) {
             setScreen('finished');
           }
         };
@@ -113,6 +118,18 @@ function App() {
                 <div className="text-white/50 text-[9px] uppercase tracking-widest font-medium">Time</div>
                 <div className="text-white font-mono text-xl font-bold tracking-tight">
                   {formatTime(gameState.time)}
+                </div>
+              </div>
+
+              {/* Lives */}
+              <div className="bg-black/50 backdrop-blur-sm rounded-xl px-3 py-2 border border-white/10">
+                <div className="text-white/50 text-[9px] uppercase tracking-widest font-medium">Lives</div>
+                <div className="flex gap-1 mt-0.5">
+                  {Array.from({ length: gameState.maxLives }).map((_, i) => (
+                    <span key={i} className={`text-xl ${i < gameState.lives ? 'opacity-100' : 'opacity-20'}`}>
+                      🪲
+                    </span>
+                  ))}
                 </div>
               </div>
 
@@ -319,6 +336,62 @@ function App() {
                 NEXT RUN →
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Game Over Screen */}
+      {screen === 'gameover' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="absolute inset-0 bg-red-950/70 backdrop-blur-sm" />
+          
+          <div className="relative text-center px-6 max-w-sm z-10">
+            <div className="text-6xl mb-4">💀</div>
+            <h2 className="text-5xl font-black text-red-400 mb-2">GAME OVER</h2>
+            <p className="text-white/60 text-sm mb-6">The backyard was too dangerous!</p>
+            
+            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-5 space-y-3 mb-8 border border-red-500/20">
+              <div className="flex justify-between items-center py-1">
+                <span className="text-white/50 text-sm font-medium">TIME</span>
+                <span className="text-white font-mono font-bold text-xl">{formatTime(gameState.time)}</span>
+              </div>
+              <div className="h-px bg-white/10" />
+              <div className="flex justify-between items-center py-1">
+                <span className="text-white/50 text-sm font-medium">CHECKPOINTS</span>
+                <span className="text-white font-mono font-bold">
+                  {gameState.currentCheckpoint}<span className="text-white/40 text-sm">/{gameState.totalCheckpoints}</span>
+                </span>
+              </div>
+              <div className="h-px bg-white/10" />
+              <div className="flex justify-between items-center py-1">
+                <span className="text-white/50 text-sm font-medium">TOP SPEED</span>
+                <span className="text-white font-mono font-bold">{Math.round(gameState.speed * 3.6)} km/h</span>
+              </div>
+              <div className="h-px bg-white/10" />
+              <div className="flex justify-between items-center py-1">
+                <span className="text-white/50 text-sm font-medium">HULA ROLLS</span>
+                <span className="text-cyan-400 font-mono font-bold">{gameState.rollCount}</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={restartGame}
+                className="w-full bg-gradient-to-r from-red-500 to-rose-600 text-white font-bold py-4 px-6 rounded-full shadow-lg shadow-red-500/30 hover:scale-105 active:scale-95 transition-all text-lg"
+              >
+                🔄 TRY AGAIN
+              </button>
+              <button
+                onClick={() => setScreen('title')}
+                className="w-full bg-white/10 text-white/70 font-medium py-3 px-6 rounded-full hover:bg-white/20 transition-all"
+              >
+                MAIN MENU
+              </button>
+            </div>
+
+            <p className="text-white/30 text-xs mt-6">
+              💡 Tip: Jump over enemies to survive!
+            </p>
           </div>
         </div>
       )}

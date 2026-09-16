@@ -17,6 +17,9 @@ export interface GameState {
   countdown: number;
   gyroActive: boolean;
   enemyHit: boolean;
+  lives: number;
+  maxLives: number;
+  gameOver: boolean;
 }
 
 // Enemy types
@@ -370,6 +373,9 @@ export class GameEngine {
     countdown: 0,
     gyroActive: false,
     enemyHit: false,
+    lives: 3,
+    maxLives: 3,
+    gameOver: false,
   };
 
   // Movement state
@@ -1257,6 +1263,9 @@ export class GameEngine {
       
       // Check collision with bug
       if (enemy.checkCollision(bugPos, this.heightAboveTrack)) {
+        // Decrement lives
+        this.state.lives--;
+        
         // Bug hit enemy - apply knockback/wobble
         this.bugWobble = Math.min(3, this.bugWobble + 1.5);
         this.wobblePhase = 0;
@@ -1269,6 +1278,12 @@ export class GameEngine {
         // Set enemy hit state for UI
         this.state.enemyHit = true;
         this.enemyHitTimer = 1.0; // Show hit indicator for 1 second
+        
+        // Check for game over
+        if (this.state.lives <= 0) {
+          this.state.gameOver = true;
+          this.state.isRunning = false;
+        }
       }
     }
   }
@@ -1310,6 +1325,8 @@ export class GameEngine {
     this.resetToStart();
     this.state.isRunning = false;
     this.state.isFinished = false;
+    this.state.gameOver = false;
+    this.state.lives = 3;
     this.countdown = 3;
     this.gameStarted = false;
   }
