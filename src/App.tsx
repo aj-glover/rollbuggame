@@ -43,18 +43,30 @@ function App() {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const engine = new GameEngine(containerRef.current);
-    engineRef.current = engine;
+    // Wait for container to have dimensions
+    const checkDimensions = () => {
+      if (containerRef.current && containerRef.current.clientWidth > 0 && containerRef.current.clientHeight > 0) {
+        const engine = new GameEngine(containerRef.current);
+        engineRef.current = engine;
 
-    engine.onStateChange = (state) => {
-      setGameState(state);
-      if (state.isFinished) {
-        setScreen('finished');
+        engine.onStateChange = (state) => {
+          setGameState(state);
+          if (state.isFinished) {
+            setScreen('finished');
+          }
+        };
+      } else {
+        // Retry after a short delay
+        setTimeout(checkDimensions, 100);
       }
     };
 
+    checkDimensions();
+
     return () => {
-      engine.dispose();
+      if (engineRef.current) {
+        engineRef.current.dispose();
+      }
     };
   }, []);
 

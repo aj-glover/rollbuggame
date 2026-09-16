@@ -23,36 +23,40 @@ function createTrackCurve(): THREE.CatmullRomCurve3 {
   const points = [
     // Start - wide section for walking
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 1, -6 * s),
-    new THREE.Vector3(0, 1, -12 * s),
+    new THREE.Vector3(0, 1, -8 * s),
+    new THREE.Vector3(2 * s, 1.5, -14 * s),
     
-    // First loop (vertical)
-    new THREE.Vector3(2 * s, 2, -14 * s),
-    new THREE.Vector3(4 * s, 6, -14 * s),
-    new THREE.Vector3(4 * s, 12, -12 * s),
-    new THREE.Vector3(2 * s, 16, -10 * s),
-    new THREE.Vector3(0, 12, -8 * s),
-    new THREE.Vector3(0, 6, -8 * s),
+    // First ramp up
+    new THREE.Vector3(6 * s, 3, -16 * s),
+    new THREE.Vector3(10 * s, 6, -14 * s),
+    new THREE.Vector3(12 * s, 10, -10 * s),
     
-    // Transition to narrow section
-    new THREE.Vector3(-2 * s, 3, -6 * s),
-    new THREE.Vector3(-4 * s, 2, -4 * s),
+    // First loop (simplified - just goes up and over)
+    new THREE.Vector3(10 * s, 14, -6 * s),
+    new THREE.Vector3(6 * s, 12, -4 * s),
+    new THREE.Vector3(4 * s, 8, -6 * s),
     
-    // Second loop (tilted corkscrew)
-    new THREE.Vector3(-6 * s, 3, -2 * s),
-    new THREE.Vector3(-8 * s, 8, 0),
-    new THREE.Vector3(-6 * s, 14, 2 * s),
-    new THREE.Vector3(-4 * s, 16, 4 * s),
-    new THREE.Vector3(-2 * s, 12, 6 * s),
-    new THREE.Vector3(-2 * s, 6, 6 * s),
+    // Transition
+    new THREE.Vector3(2 * s, 5, -8 * s),
+    new THREE.Vector3(0, 3, -6 * s),
+    
+    // Second ramp
+    new THREE.Vector3(-4 * s, 4, -4 * s),
+    new THREE.Vector3(-8 * s, 7, -2 * s),
+    new THREE.Vector3(-10 * s, 11, 0),
+    
+    // Second loop (simplified)
+    new THREE.Vector3(-8 * s, 14, 2 * s),
+    new THREE.Vector3(-4 * s, 12, 4 * s),
+    new THREE.Vector3(-2 * s, 8, 2 * s),
     
     // Wide section (hula roll opportunity)
-    new THREE.Vector3(0, 4, 8 * s),
-    new THREE.Vector3(4 * s, 3, 10 * s),
-    new THREE.Vector3(8 * s, 2, 10 * s),
+    new THREE.Vector3(0, 5, 4 * s),
+    new THREE.Vector3(4 * s, 4, 8 * s),
+    new THREE.Vector3(8 * s, 3, 10 * s),
     
     // Downhill finish
-    new THREE.Vector3(12 * s, 1, 8 * s),
+    new THREE.Vector3(12 * s, 2, 8 * s),
     new THREE.Vector3(16 * s, 1, 6 * s),
     new THREE.Vector3(20 * s, 1, 6 * s),
   ];
@@ -153,15 +157,25 @@ export class GameEngine {
   }
 
   private init() {
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.3;
-    this.container.appendChild(this.renderer.domElement);
+    try {
+      // Renderer
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      
+      // Ensure container has dimensions
+      const width = this.container.clientWidth || window.innerWidth;
+      const height = this.container.clientHeight || window.innerHeight;
+      this.renderer.setSize(width, height);
+      
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.3;
+      this.container.appendChild(this.renderer.domElement);
+    } catch (error) {
+      console.error('Failed to initialize WebGL renderer:', error);
+      return;
+    }
 
     // Scene
     this.scene = new THREE.Scene();
@@ -892,7 +906,8 @@ export class GameEngine {
       mat.emissiveIntensity += (targetEmissive - mat.emissiveIntensity) * dt * 3;
       
       // Float animation
-      marker.position.y = this.trackCurve.getPoint(this.checkpoints[i].t).y + 0.5 + Math.sin(time * 2 + i) * 0.2;
+      const cpPoint = this.trackCurve.getPoint(this.checkpoints[i].t);
+      marker.position.y = cpPoint.y + 0.5 + Math.sin(time * 2 + i) * 0.2;
       
       // Color change when passed
       if (isActive) {
@@ -905,9 +920,9 @@ export class GameEngine {
     }
 
     // Animate finish marker
-    if (this.finishMarker) {
-      this.finishMarker.children[0].position.y = 
-        this.trackCurve.getPoint(0.97).y + 0.5 + Math.sin(time * 3) * 0.15;
+    if (this.finishMarker && this.finishMarker.children[0]) {
+      const finishPoint = this.trackCurve.getPoint(0.97);
+      this.finishMarker.children[0].position.y = finishPoint.y + 0.5 + Math.sin(time * 3) * 0.15;
     }
   }
 
@@ -958,38 +973,43 @@ export class GameEngine {
 
   private animate = () => {
     this.animationId = requestAnimationFrame(this.animate);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    
+    try {
+      const dt = Math.min(this.clock.getDelta(), 0.05);
 
-    this.controls.update(dt);
+      this.controls.update(dt);
 
-    // Countdown
-    if (this.countdown > 0) {
-      this.countdown -= dt;
-      if (this.countdown <= 0) {
-        this.countdown = 0;
-        this.gameStarted = true;
-        this.state.isRunning = true;
+      // Countdown
+      if (this.countdown > 0) {
+        this.countdown -= dt;
+        if (this.countdown <= 0) {
+          this.countdown = 0;
+          this.gameStarted = true;
+          this.state.isRunning = true;
+        }
       }
+
+      if (this.state.isRunning && !this.state.isFinished) {
+        this.state.time += dt;
+        this.updatePhysics(dt);
+      }
+
+      this.updateBugVisuals(dt);
+      this.updateCamera(dt);
+      this.updateParticles(dt);
+      this.updateCheckpointMarkers(dt);
+
+      // Step physics (for ground collision only)
+      this.world.step(1 / 60, dt, 3);
+
+      this.renderer.render(this.scene, this.camera);
+
+      this.state.speed = this.forwardSpeed;
+      this.state.countdown = this.countdown;
+      this.onStateChange?.({ ...this.state });
+    } catch (error) {
+      console.error('Animation loop error:', error);
     }
-
-    if (this.state.isRunning && !this.state.isFinished) {
-      this.state.time += dt;
-      this.updatePhysics(dt);
-    }
-
-    this.updateBugVisuals(dt);
-    this.updateCamera(dt);
-    this.updateParticles(dt);
-    this.updateCheckpointMarkers(dt);
-
-    // Step physics (for ground collision only)
-    this.world.step(1 / 60, dt, 3);
-
-    this.renderer.render(this.scene, this.camera);
-
-    this.state.speed = this.forwardSpeed;
-    this.state.countdown = this.countdown;
-    this.onStateChange?.({ ...this.state });
   }
 
   private updatePhysics(dt: number) {
@@ -1307,11 +1327,13 @@ export class GameEngine {
   }
 
   private onResize() {
-    const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h);
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    if (w > 0 && h > 0) {
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(w, h);
+    }
   }
 
   dispose() {
